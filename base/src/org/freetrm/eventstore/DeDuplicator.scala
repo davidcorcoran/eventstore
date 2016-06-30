@@ -3,6 +3,7 @@ package org.freetrm.eventstore
 import java.security.MessageDigest
 import java.util.concurrent.{ConcurrentHashMap, FutureTask}
 
+import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Sink
@@ -21,49 +22,53 @@ class DeDuplicator(reader: EventSourceReader, writer: EventSourceWriter)
   
   private val dedup = new ConcurrentHashMap[Topic, FutureTask[Future[SingleTopicDeDuplicator]]]
   import scala.concurrent.ExecutionContext.Implicits.global
+  
+  
+//
+//  override def write(topic: Topic, event: Event): Future[EventVersionPair] = {
+//    writeWithDuplicateCheckResult(topic, event).map(_.version)
+//  }
+//
+//  override def writeAll(events: Seq[(Topic, Event)]): Future[Seq[EventVersionPair]] = {
+//    Future.sequence(events.map(e => write(e._1, e._2)))
+//  }
+//
+//  def writeWithDuplicateCheckResult(topic: Topic, event: Event): Future[WriteResult] = {
+//    val future = try {
+//      deDuplicator(topic).flatMap {
+//        case topicDeDuplicator =>
+//          event match {
+//            case EventSourceEvent(version, key, contentHash, data) =>
+//              topicDeDuplicator.previousVersion(key, contentHash) match {
+//                case Some(previousVersion) =>
+//                  Future.successful(WriteResult(wasDuplicate = true, previousVersion))
+//                case _ =>
+//                  try {
+//                    writer.write(topic, event).map {
+//                      case _ =>
+//                        topicDeDuplicator.update(key, contentHash, version)
+//                        WriteResult(wasDuplicate = false, version)
+//                    }
+//                  } catch {
+//                    case NonFatal(e) => Future.failed(e)
+//                  }
+//              }
+//            case _ =>
+//              writer.write(topic, event).map(WriteResult(false, _))
+//          }
+//      }
+//    } catch {
+//      case NonFatal(e) => Future.failed(e)
+//    }
+//    future.onFailure {
+//      case ex =>
+//        log.error(s"Failed to write data for topic: $topic", ex)
+//        dedup.remove(topic)
+//    }
+//    future
+//  }
 
-  override def write(topic: Topic, event: Event): Future[EventVersionPair] = {
-    writeWithDuplicateCheckResult(topic, event).map(_.version)
-  }
-
-  override def writeAll(events: Seq[(Topic, Event)]): Future[Seq[EventVersionPair]] = {
-    Future.sequence(events.map(e => write(e._1, e._2)))
-  }
-
-  def writeWithDuplicateCheckResult(topic: Topic, event: Event): Future[WriteResult] = {
-    val future = try {
-      deDuplicator(topic).flatMap {
-        case topicDeDuplicator =>
-          event match {
-            case EventSourceEvent(version, key, contentHash, data) =>
-              topicDeDuplicator.previousVersion(key, contentHash) match {
-                case Some(previousVersion) =>
-                  Future.successful(WriteResult(wasDuplicate = true, previousVersion))
-                case _ =>
-                  try {
-                    writer.write(topic, event).map {
-                      case _ =>
-                        topicDeDuplicator.update(key, contentHash, version)
-                        WriteResult(wasDuplicate = false, version)
-                    }
-                  } catch {
-                    case NonFatal(e) => Future.failed(e)
-                  }
-              }
-            case _ =>
-              writer.write(topic, event).map(WriteResult(false, _))
-          }
-      }
-    } catch {
-      case NonFatal(e) => Future.failed(e)
-    }
-    future.onFailure {
-      case ex =>
-        log.error(s"Failed to write data for topic: $topic", ex)
-        dedup.remove(topic)
-    }
-    future
-  }
+  override def sink: Sink[(Topic, Event), NotUsed] = ???
 
   override def close(): Unit = {
     dedup.clear()

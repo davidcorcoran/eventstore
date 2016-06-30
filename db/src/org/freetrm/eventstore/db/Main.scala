@@ -46,7 +46,7 @@ object Main {
       } else {
         throw new Exception("Invalid db url: " + dbUrl)
       }
-      val writer = new DBWriter(new H2(dbUrl, user, password))
+      val writer = new DBWriter(new H2(dbUrl, user, password), maxBacklog = 10000)
       val reader = new DBEventSourceReader(dbReader, writer.dbWritingActor)
       (writer, reader)
     }

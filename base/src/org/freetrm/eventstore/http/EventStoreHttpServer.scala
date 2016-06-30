@@ -1,26 +1,24 @@
 package org.freetrm.eventstore.http
 
-import java.net.URLDecoder
-import java.util.concurrent.atomic.AtomicReference
-
 import akka.NotUsed
-import akka.actor.{ActorLogging, Actor, Props, ActorSystem}
-import akka.http.scaladsl.coding.{NoCoding, Gzip}
+import akka.actor.ActorSystem
+import akka.http.scaladsl.coding.{Gzip, NoCoding}
+import akka.http.scaladsl.marshalling.ToResponseMarshallable
 import akka.http.scaladsl.model.StatusCodes._
-import akka.http.scaladsl.model.headers.{Allow, HttpChallenge, BasicHttpCredentials, HttpCredentials}
 import akka.http.scaladsl.model._
-import akka.http.scaladsl.server.Directives._
+import akka.http.scaladsl.model.headers.{BasicHttpCredentials, HttpChallenge, HttpCredentials}
 import akka.http.scaladsl.server._
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{Flow, Source}
-import de.heikoseeberger.akkasse.{ServerSentEvent, EventStreamMarshalling}
+import de.heikoseeberger.akkasse.{EventStreamMarshalling, ServerSentEvent}
+import fommil.sjs.FamilyFormats._
 import org.freetrm.eventstore._
 import org.freetrm.eventstore.utils._
 import spray.json._
-import fommil.sjs.FamilyFormats._
+
+import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.util.control.NonFatal
-import scala.concurrent.duration.DurationInt
 
 
 
@@ -78,7 +76,8 @@ class EventStoreHttpServer(writer: EventSourceWriter,
                   entity(as[String]) {
                     data =>
                       val event = data.parseJson.convertTo[Event]
-                      complete(writeToEventStore(Topic(topic), event))
+                      val store = writeToEventStore(Topic(topic), event)
+                      complete(ToResponseMarshallable.apply(store))
                   }
               }
           }
@@ -147,16 +146,17 @@ class EventStoreHttpServer(writer: EventSourceWriter,
   }
 
   def writeToEventStore(topic: Topic, event: Event): Future[HttpResponse] = {
-    execAndHandle(
-      () => dedup.writeWithDuplicateCheckResult(topic, event).map {
-        case result if !result.wasDuplicate =>
-          response(OK, EventStoreResponseOK(result.version))
-        case result =>
-          response(OK, EventStoreResponseDuplicate(result.version))
-      },
-      e =>
-        s"Failed to publish to event store: $topic: $event"
-    )
+    ???
+//    execAndHandle(
+//      () => dedup.writeWithDuplicateCheckResult(topic, event).map {
+//        case result if !result.wasDuplicate =>
+//          response(OK, EventStoreResponseOK(result.version))
+//        case result =>
+//          response(OK, EventStoreResponseDuplicate(result.version))
+//      },
+//      e =>
+//        s"Failed to publish to event store: $topic: $event"
+//    )
   }
 
 
@@ -233,7 +233,6 @@ class EventStoreHttpServer(writer: EventSourceWriter,
   }
 
   private def response(status: StatusCode, resp: EventStoreResponse) = {
-    import fommil.sjs.FamilyFormats._
 
     val json = (resp: EventStoreResponse).toJson.prettyPrint
     HttpResponse(status = status, entity = HttpEntity(MediaTypes.`application/json`, json))

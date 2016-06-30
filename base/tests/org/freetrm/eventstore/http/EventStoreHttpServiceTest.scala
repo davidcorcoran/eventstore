@@ -92,7 +92,7 @@ class EventStoreHttpServiceTest extends FunSuite with FunSuiteDoc
     val version = EventVersionPair(result, 0)
     val event = EventSourceEvent(version, id, hash, message)
     
-    (writer.write _).expects(topic, event).returns(Future.successful(version))
+//    (writer.write _).expects(topic, event).returns(Future.successful(version))
     val webService = new EventStoreHttpServer(writer, emptyReader, cookie)
 
     val json = (event: Event).toJson.prettyPrint
@@ -173,7 +173,7 @@ class EventStoreHttpServiceTest extends FunSuite with FunSuiteDoc
     val exceptionMessage = "Test exception (ignore if you see in test output)"
 
     val event = EventSourceEvent(EventVersionPair(0l, 0l), id, hash, message)
-    (writer.write _).expects(topic, event).returns(Future.failed(new Exception(exceptionMessage)))
+//    (writer.write _).expects(topic, event).returns(Future.failed(new Exception(exceptionMessage)))
 
     val webService = new EventStoreHttpServer(writer, emptyReader, cookie)
 

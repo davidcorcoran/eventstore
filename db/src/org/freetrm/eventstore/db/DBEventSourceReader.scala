@@ -84,7 +84,7 @@ class EventPublisher(reader: DBTopicReader,
     case ActorPublisherMessage.Cancel | ActorPublisherMessage.SubscriptionTimeoutExceeded =>
       context.stop(self)
       
-    case EventVersionPair(seqNo, _) =>
+    case TopicOffsetInfo(`topic`, EventVersionPair(seqNo, _)) =>
       maxSeqNo = seqNo
       self ! Poll
 

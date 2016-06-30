@@ -2,6 +2,7 @@ package org.freetrm.eventstore.db
 
 import java.util.UUID
 
+import akka.NotUsed
 import akka.actor.{ActorRef, Props, ActorSystem}
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{Sink, Source}
@@ -20,7 +21,7 @@ import scala.util.Random
 class DBEventStoreTest extends FunSuite with FunSuiteDoc 
   with Matchers with ScalaFutures with MockFactory with Eventually {
   
-  implicit val defaultPatience = PatienceConfig(timeout = Span(10, Seconds), interval = Span(15, Millis))
+  implicit val defaultPatience = PatienceConfig(timeout = Span(100, Seconds), interval = Span(15, Millis))
   implicit val system = ActorSystem()
   implicit val timeout = new Timeout(FiniteDuration(2, "s"))
   implicit val materializer = ActorMaterializer()
@@ -95,11 +96,14 @@ class DBEventStoreTest extends FunSuite with FunSuiteDoc
     val numEvents = 4
     writeEventsInTransaction(writer, numEvents)
     
-    reader.maxSeqNo(topic).futureValue shouldEqual Some(numEvents - 1)
-    reader.maxTxnNo(topic).futureValue shouldEqual Some(0)
+    eventually {
+      reader.maxSeqNo(topic).futureValue shouldEqual Some(numEvents - 1)
+      reader.maxTxnNo(topic).futureValue shouldEqual Some(0)
 
-    reader.listTopics.futureValue shouldEqual Seq(topic)
-    reader.topicExists(topic).futureValue shouldEqual true
+      reader.listTopics.futureValue shouldEqual Seq(topic)
+      reader.topicExists(topic).futureValue shouldEqual true
+    }
+    
     reader.streamEvents(topic, 0, Some(3)).runWith(Sink.seq).futureValue shouldEqual Seq(
       EventTransactionStart(EventVersionPair(0, 0)), 
       EventSourceEvent(EventVersionPair(1, 0), "key1", "cv", "data1"), 
@@ -132,10 +136,16 @@ class DBEventStoreTest extends FunSuite with FunSuiteDoc
   test("event order is correct") {
     val (reader, writer) = newReaderAndWriter()
 
-    val numEvents = 500
+    val numEvents = 5
     writeEventsInTransaction(writer, numEvents)
+
+    val maxSeq = eventually {
+      val max = reader.maxSeqNo(topic).futureValue
+      max shouldEqual Some(4)
+      max
+    }
     
-    val allEvents = reader.streamEvents(topic, 0, reader.maxSeqNo(topic).futureValue).runWith(Sink.seq).futureValue
+    val allEvents = reader.streamEvents(topic, 0, maxSeq).runWith(Sink.seq).futureValue
     
     allEvents.foreach {
       case EventSourceEvent(EventVersionPair(seqNo, _), key, hash, data) =>
@@ -170,9 +180,9 @@ class DBEventStoreTest extends FunSuite with FunSuiteDoc
 
     val notificationsFuture = reader.streamNotifications.runWith(Sink.seq)
 
-    var version = writeEventsInTransaction(writer, 20)
-    version = writeEventsInTransaction(writer, 40, Some(version.incrementTxn.incrementSeq))
-    writeEventsInTransaction(writer, 55, Some(version.incrementTxn.incrementSeq))
+    writeEventsInTransaction(writer, 20)
+    writeEventsInTransaction(writer, 40, Some(EventVersionPair(20, 1)))
+    writeEventsInTransaction(writer, 55, Some(EventVersionPair(40, 2)))
 
     reader.close()
     writer.close()
@@ -312,12 +322,30 @@ class DBEventStoreTest extends FunSuite with FunSuiteDoc
     
     expected shouldEqual surface
   }
+
+
+  test("writing larger amounts that the max backlog will allow") {
+    val (reader, writer) = newReaderAndWriter(maxBacklog = 10)
+
+    val numEvents = 100000
+    writeEventsInTransaction(writer, numEvents)
+
+    eventually {
+      reader.maxSeqNo(topic).futureValue shouldEqual Some(numEvents - 1)
+      reader.maxTxnNo(topic).futureValue shouldEqual Some(0)
+
+      reader.listTopics.futureValue shouldEqual Seq(topic)
+      reader.topicExists(topic).futureValue shouldEqual true
+    }
+
+    reader.streamEvents(topic, 0, Some(numEvents - 1)).runWith(Sink.seq).futureValue.size shouldEqual numEvents
+  }
   
   def dbUrl = "jdbc:h2:mem:" + UUID.randomUUID + ";DB_CLOSE_DELAY=-1"
   
-  private def newReaderAndWriter(db: String = dbUrl) = {
+  private def newReaderAndWriter(db: String = dbUrl, maxBacklog: Int = 100000) = {
     val dbReader = new H2DBReader(db)
-    val writer = new DBWriter(new H2(db))(system)
+    val writer = new DBWriter(new H2(db), maxBacklog)(system)
     val reader = new DBEventSourceReader(dbReader, writer.dbWritingActor)
     
     writer.dropAndRecreate().futureValue shouldEqual true
@@ -325,8 +353,8 @@ class DBEventStoreTest extends FunSuite with FunSuiteDoc
     (reader, writer)
   }
   
-  private def newWriter(db: String) = {
-    val writer = new DBWriter(new H2(db))(system)
+  private def newWriter(db: String, maxBacklog: Int = 100000) = {
+    val writer = new DBWriter(new H2(db), maxBacklog)(system)
     writer.dropAndRecreate().futureValue shouldEqual true
     writer.start().futureValue
     writer
@@ -335,13 +363,13 @@ class DBEventStoreTest extends FunSuite with FunSuiteDoc
   private def writeEventsInTransaction(writer: DBWriter, 
                                        numEvents: Int, 
                                        initialVersion: Option[EventVersionPair] = None,
-                                       key: Int => String = i => s"key$i"): EventVersionPair = {
+                                       key: Int => String = i => s"key$i"): NotUsed = {
     import system.dispatcher
     
     val start = initialVersion.map(_.seqNo).getOrElse(0l)
     val txn = initialVersion.map(_.txnNo).getOrElse(0l)
     val total = numEvents + start
-    val toInsert = (start until total).map {
+    val toInsert = Source(start until total).map {
       i =>
         if(i == start)
           topic -> EventTransactionStart(EventVersionPair(i, txn))
@@ -350,6 +378,6 @@ class DBEventStoreTest extends FunSuite with FunSuiteDoc
         else
           topic -> EventSourceEvent(EventVersionPair(i, txn), key(i.toInt), "cv", s"data$i")
     }
-    writer.writeAll(toInsert).map(_.last).futureValue
+    toInsert.runWith(writer.sink)
   }
 }

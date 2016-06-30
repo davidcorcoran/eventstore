@@ -1,5 +1,8 @@
 package org.freetrm.eventstore
 
+import akka.NotUsed
+import akka.stream.scaladsl.{Sink, Source}
+
 import scala.concurrent.Future
 
 
@@ -18,9 +21,7 @@ import scala.concurrent.Future
   * that is not one bigger than the previous.
   */
 trait EventSourceWriter {
-  def write(topic: Topic, event: Event): Future[EventVersionPair]
-  
-  def writeAll(events: Seq[(Topic, Event)]): Future[Seq[EventVersionPair]]
+  def sink: Sink[(Topic, Event), NotUsed]
   
   def close(): Unit
 }

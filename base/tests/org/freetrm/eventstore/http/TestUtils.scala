@@ -6,7 +6,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import akka.NotUsed
 import akka.actor.{ActorSystem, Props}
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
-import akka.stream.scaladsl.Source
+import akka.stream.scaladsl.{Sink, Source}
 import org.freetrm.eventstore._
 import org.freetrm.eventstore.http.ESTestUtils.{BufferEventSourceReader, TestEventSourceReader}
 import org.scalamock.scalatest.MockFactory
@@ -114,23 +114,27 @@ trait ESTestUtils {
         Future.successful(EventVersionPair(currSeqNo, currTxnNo))
       }
 
-      override def writeAll(events: Seq[(Topic, Event)]): Future[Seq[EventVersionPair]] = ???
+      
+      
+//      override def writeAll(events: Seq[(Topic, Event)]): Future[Seq[EventVersionPair]] = ???
+//
+//      override def write(topic: Topic, event: Event): Future[EventVersionPair] = event match {
+//        case EventTransactionStart(version) =>
+//          require(!inTransaction, "(Test exception) Already in a transaction")
+//          inTransaction = true
+//          currTxnNo += 1
+//          write((s, t) => EventTransactionStart(EventVersionPair(s, t)))
+//        case EventTransactionEnd(version) =>
+//          require(inTransaction, "(Test exception) Not in a transaction")
+//          inTransaction = false
+//          write((s, t) => EventTransactionEnd(EventVersionPair(s, t)))
+//        case EventSourceEvent(version, key, contentHash, data) =>
+//          require(inTransaction, "(Test exception) Not in a transaction")
+//          write((s, t) => EventSourceEvent(EventVersionPair(s, t), key, contentHash, data))
+//        case EventInvalidate(version) => sys.error("Not testing")
+//      }
 
-      override def write(topic: Topic, event: Event): Future[EventVersionPair] = event match {
-        case EventTransactionStart(version) =>
-          require(!inTransaction, "(Test exception) Already in a transaction")
-          inTransaction = true
-          currTxnNo += 1
-          write((s, t) => EventTransactionStart(EventVersionPair(s, t)))
-        case EventTransactionEnd(version) =>
-          require(inTransaction, "(Test exception) Not in a transaction")
-          inTransaction = false
-          write((s, t) => EventTransactionEnd(EventVersionPair(s, t)))
-        case EventSourceEvent(version, key, contentHash, data) =>
-          require(inTransaction, "(Test exception) Not in a transaction")
-          write((s, t) => EventSourceEvent(EventVersionPair(s, t), key, contentHash, data))
-        case EventInvalidate(version) => sys.error("Not testing")
-      }
+      override def sink: Sink[(Topic, Event), NotUsed] = ???
 
       override def close(): Unit = {}
     }
