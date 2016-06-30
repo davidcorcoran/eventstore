@@ -65,7 +65,9 @@ class DeDuplicatorTest extends FunSuite with FunSuiteDoc
         events += event
         Future.successful(event.version)
       }
-      
+
+      override def writeAll(events: Seq[(Topic, Event)]): Future[Seq[EventVersionPair]] = ???
+
       override def close(): Unit = ???
     }
     

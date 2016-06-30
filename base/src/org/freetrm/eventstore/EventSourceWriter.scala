@@ -19,7 +19,9 @@ import scala.concurrent.Future
   */
 trait EventSourceWriter {
   def write(topic: Topic, event: Event): Future[EventVersionPair]
-
+  
+  def writeAll(events: Seq[(Topic, Event)]): Future[Seq[EventVersionPair]]
+  
   def close(): Unit
 }
 

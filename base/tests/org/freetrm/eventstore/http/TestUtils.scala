@@ -114,6 +114,8 @@ trait ESTestUtils {
         Future.successful(EventVersionPair(currSeqNo, currTxnNo))
       }
 
+      override def writeAll(events: Seq[(Topic, Event)]): Future[Seq[EventVersionPair]] = ???
+
       override def write(topic: Topic, event: Event): Future[EventVersionPair] = event match {
         case EventTransactionStart(version) =>
           require(!inTransaction, "(Test exception) Already in a transaction")

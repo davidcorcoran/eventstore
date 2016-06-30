@@ -46,8 +46,8 @@ object Main {
       } else {
         throw new Exception("Invalid db url: " + dbUrl)
       }
-      val reader = new DBEventSourceReader(dbReader)
-      val writer = new H2ESWriter(dbUrl, user, password, topicInfoActor = Some(reader.topicInfoActor))
+      val writer = new DBWriter(new H2(dbUrl, user, password))
+      val reader = new DBEventSourceReader(dbReader, writer.dbWritingActor)
       (writer, reader)
     }
     

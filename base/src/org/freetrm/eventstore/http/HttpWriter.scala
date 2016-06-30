@@ -5,7 +5,8 @@ import java.net.URLEncoder
 import java.util.zip.GZIPOutputStream
 
 import akka.NotUsed
-import akka.actor.ActorSystem
+import akka.actor.Actor.Receive
+import akka.actor.{ActorLogging, Actor, ActorSystem}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import akka.http.scaladsl.model._

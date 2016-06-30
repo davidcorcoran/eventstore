@@ -148,9 +148,9 @@ class DBEventStoreTest extends FunSuite with FunSuiteDoc
     val db = dbUrl
     val h2readerLowLimit = new H2DBReader(db, maxFetch = 40)
     val h2readerHighLimit = new H2DBReader(db, maxFetch = 1000)
-    val reader = new DBEventSourceReader(h2readerLowLimit)
+    val writer = newWriter(db)
     
-    val writer = newWriter(db, reader.topicInfoActor)
+    val reader = new DBEventSourceReader(h2readerLowLimit, writer.dbWritingActor)
 
     val numEvents = 200
     writeEventsInTransaction(writer, numEvents)
@@ -171,18 +171,19 @@ class DBEventStoreTest extends FunSuite with FunSuiteDoc
     val notificationsFuture = reader.streamNotifications.runWith(Sink.seq)
 
     var version = writeEventsInTransaction(writer, 20)
-    version = writeEventsInTransaction(writer, 40, Some(version))
-    writeEventsInTransaction(writer, 55, Some(version))
+    version = writeEventsInTransaction(writer, 40, Some(version.incrementTxn.incrementSeq))
+    writeEventsInTransaction(writer, 55, Some(version.incrementTxn.incrementSeq))
 
     reader.close()
+    writer.close()
 
     val notifications = notificationsFuture.futureValue
     notifications should contain (EventNotification(Map()))
-    notifications should contain (EventNotification(Map(topic -> EventVersionPair(10, 0))))
-    notifications should contain (EventNotification(Map(topic -> EventVersionPair(50, 1))))
-    notifications should contain (EventNotification(Map(topic -> EventVersionPair(70, 2))))
+    notifications should contain (EventNotification(Map(topic -> EventVersionPair(19, 0))))
+    notifications should contain (EventNotification(Map(topic -> EventVersionPair(59, 1))))
+    notifications should contain (EventNotification(Map(topic -> EventVersionPair(114, 2))))
 
-    notifications.size shouldEqual 1 + 20 + 40 + 55 // extra one for the initial empty notification
+    notifications.size shouldEqual 1 + 3 // 3 batched writes and extra one for the initial empty notification
   }
   
   test("slow notification consumer gets batches of updates") {
@@ -197,17 +198,19 @@ class DBEventStoreTest extends FunSuite with FunSuiteDoc
         e
     }.runWith(Sink.seq)
 
-    var version = writeEventsInTransaction(writer, 20)
-    version = writeEventsInTransaction(writer, 40, Some(version))
-    writeEventsInTransaction(writer, 55, Some(version))
+    (0 to 100).foreach {
+      i =>
+        writeEventsInTransaction(writer, 20, Some(EventVersionPair(i * 20, i)))
+    }
     
-    Thread.sleep(1000)
     reader.close()
+    Thread.sleep(200) // if we close the writer below while the "slow reader" is still reading we'll miss a notification
+    writer.close()
     val notifications = notificationsFuture.futureValue
 
     // should have the first and last ones
     notifications should contain (EventNotification(Map()))
-    notifications should contain (EventNotification(Map(topic -> EventVersionPair(20 + 40 + 55 -1, 2))))
+    notifications should contain (EventNotification(Map(topic -> EventVersionPair(2019, 100))))
     
     // and won't have all the in between but should have a few
     notifications.size should be > 10
@@ -228,8 +231,8 @@ class DBEventStoreTest extends FunSuite with FunSuiteDoc
       }
     }
 
-    val reader = new DBEventSourceReader(h2reader)
-    val writer = newWriter(db, reader.topicInfoActor)
+    val writer = newWriter(db)
+    val reader = new DBEventSourceReader(h2reader, writer.dbWritingActor)
 
     val numEvents = 400
     writeEventsInTransaction(writer, numEvents)
@@ -270,8 +273,8 @@ class DBEventStoreTest extends FunSuite with FunSuiteDoc
       }
     }
 
-    val reader = new DBEventSourceReader(h2reader)
-    val writer = newWriter(db, reader.topicInfoActor)
+    val writer = newWriter(db)
+    val reader = new DBEventSourceReader(h2reader, writer.dbWritingActor)
 
     val numEvents = 400
     writeEventsInTransaction(writer, numEvents)
@@ -314,16 +317,16 @@ class DBEventStoreTest extends FunSuite with FunSuiteDoc
   
   private def newReaderAndWriter(db: String = dbUrl) = {
     val dbReader = new H2DBReader(db)
-    val reader = new DBEventSourceReader(dbReader)
+    val writer = new DBWriter(new H2(db))(system)
+    val reader = new DBEventSourceReader(dbReader, writer.dbWritingActor)
     
-    val writer = new H2ESWriter(db, topicInfoActor = Some(reader.topicInfoActor))(system)
     writer.dropAndRecreate().futureValue shouldEqual true
     writer.start().futureValue
     (reader, writer)
   }
   
-  private def newWriter(db: String, topicInfoActor: ActorRef) = {
-    val writer = new H2ESWriter(db, topicInfoActor = Some(topicInfoActor))(system)
+  private def newWriter(db: String) = {
+    val writer = new DBWriter(new H2(db))(system)
     writer.dropAndRecreate().futureValue shouldEqual true
     writer.start().futureValue
     writer
@@ -333,15 +336,20 @@ class DBEventStoreTest extends FunSuite with FunSuiteDoc
                                        numEvents: Int, 
                                        initialVersion: Option[EventVersionPair] = None,
                                        key: Int => String = i => s"key$i"): EventVersionPair = {
-    Source(0 until numEvents).fold(initialVersion.getOrElse(EventVersionPair(seqNo = -1, txnNo = -1))) {
-      case (version, i) =>
-        if(i == 0)
-          writer.startTransaction(version.incrementSeq.incrementTxn, topic).futureValue
-        else if (i == numEvents - 1)
-          writer.endTransaction(version.incrementSeq, topic).futureValue
-        else
-          writer.produce(version.incrementSeq, topic, key(i), "cv", s"data$i").futureValue
-    }.runWith(Sink.last).futureValue(PatienceConfig(timeout = Span(20, Seconds)))
+    import system.dispatcher
     
+    val start = initialVersion.map(_.seqNo).getOrElse(0l)
+    val txn = initialVersion.map(_.txnNo).getOrElse(0l)
+    val total = numEvents + start
+    val toInsert = (start until total).map {
+      i =>
+        if(i == start)
+          topic -> EventTransactionStart(EventVersionPair(i, txn))
+        else if (i == total - 1)
+          topic -> EventTransactionEnd(EventVersionPair(i, txn))
+        else
+          topic -> EventSourceEvent(EventVersionPair(i, txn), key(i.toInt), "cv", s"data$i")
+    }
+    writer.writeAll(toInsert).map(_.last).futureValue
   }
 }

@@ -25,7 +25,11 @@ class DeDuplicator(reader: EventSourceReader, writer: EventSourceWriter)
   override def write(topic: Topic, event: Event): Future[EventVersionPair] = {
     writeWithDuplicateCheckResult(topic, event).map(_.version)
   }
-  
+
+  override def writeAll(events: Seq[(Topic, Event)]): Future[Seq[EventVersionPair]] = {
+    Future.sequence(events.map(e => write(e._1, e._2)))
+  }
+
   def writeWithDuplicateCheckResult(topic: Topic, event: Event): Future[WriteResult] = {
     val future = try {
       deDuplicator(topic).flatMap {

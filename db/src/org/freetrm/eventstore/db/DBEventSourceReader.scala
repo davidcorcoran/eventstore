@@ -9,7 +9,7 @@ import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.stream.scaladsl.Source
 import akka.util.Timeout
 import org.freetrm.eventstore._
-import org.freetrm.eventstore.db.TopicsInfoActor._
+import org.freetrm.eventstore.db.TopicActor._
 import org.freetrm.eventstore.utils.Log
 
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -18,13 +18,10 @@ import scala.concurrent.duration.FiniteDuration
 import scala.util.control.NonFatal
 import scala.util.{Random, Failure, Success}
 
-case class DBEventSourceReader(dbReader: DBTopicReader)(implicit val system: ActorSystem)
+case class DBEventSourceReader(dbReader: DBTopicReader, topicInfoActor: ActorRef)(implicit val system: ActorSystem)
   extends EventSourceReader with Log {
   
   implicit val askTimeout = new Timeout(FiniteDuration(2, "s"))
-
-  val topicInfoActor: ActorRef = system.actorOf(Props(new TopicsInfoActor()), 
-                                                name = s"TopicsInfoActor-${UUID.randomUUID}")
 
   override def streamEvents(topic: Topic,
                             earliestOffsetToReadFrom: Long,
@@ -37,13 +34,12 @@ case class DBEventSourceReader(dbReader: DBTopicReader)(implicit val system: Act
 
   override def streamNotifications: Source[EventNotification, NotUsed] = {
     val props = Props(new EventNotificationPublisher(topicInfoActor))
-    Source.fromPublisher(ActorPublisher[EventNotification](system.actorOf(props, name = "DBEventSourceReader")))
+    Source.fromPublisher(ActorPublisher[EventNotification](system.actorOf(props)))
   }
 
   override def latestSurface(topic: Topic): Source[EventSourceEvent, NotUsed] = dbReader.latestSurface(topic)
 
   override def close(): Unit = {
-    topicInfoActor ! TopicsInfoActorShutdown("DBEventSourceReader.Close called")
     dbReader.close()
   }
 
@@ -92,7 +88,7 @@ class EventPublisher(reader: DBTopicReader,
       maxSeqNo = seqNo
       self ! Poll
 
-    case TopicsInfoActorShutdown(reason) =>
+    case ActorShutdown(reason) =>
       log.info(s"TopicInfoActor has shut down, stopping: $reason")
       onCompleteThenStop()
   }
@@ -162,7 +158,7 @@ class EventNotificationPublisher(topicInfo: ActorRef)
       nextSend = Some(offsets)
       self ! Poll
 
-    case TopicsInfoActorShutdown(reason) =>
+    case ActorShutdown(reason) =>
       log.info(s"TopicInfoActor has shut down, stopping: $reason")
       onCompleteThenStop()
   }

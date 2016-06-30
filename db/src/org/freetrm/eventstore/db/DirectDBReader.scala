@@ -4,8 +4,8 @@ import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Source
-import org.freetrm.eventstore.db.TopicsInfoActor.TopicOffsetInfo
 import org.freetrm.eventstore._
+import org.freetrm.eventstore.db.TopicActor.TopicOffsetInfo
 import org.freetrm.eventstore.http.HttpReader
 import org.freetrm.eventstore.utils.Log
 
@@ -13,7 +13,7 @@ import scala.concurrent.Future
 
 /**
   * Rather than receiving all the events from the HttpReader you can go direct to the database. However
-  *  you do need to be told about changes to the DB (new events). So we use HttpReader.consumeNotifications for
+  *  you do need to be told about changes to the DB (new events). So we use HttpReader.streamNotifications for
   *  that.
   */
 class DirectDBReader(reader: DBEventSourceReader, httpReader: HttpReader)
